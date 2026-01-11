@@ -1,0 +1,5 @@
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.txt

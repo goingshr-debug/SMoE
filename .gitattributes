@@ -1,0 +1,2 @@
+# inside .gitattributes
+*.bigfile filter=skiplarge
