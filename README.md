@@ -2,7 +2,7 @@
 
 SMoE inference acceleration framework with GPU/CPU expert caching for Mixture-of-Experts LLMs. SMoE leverages expert importance to guide decisions, substituting low-importance active experts with functionally similar ones already cached in GPU memory, thereby preserving accuracy. 
 
-Supports three models: **DeepSeek-MoE**, **Qwen2-MoE**, **Xverse-MoE**.
+Supports three models: **deepseek-ai/deepseek-moe-16b-chat**, **Qwen/Qwen2-57B-A14B-Instruct**, **xverse/XVERSE-MoE-A4.2B**.
 
 ---
 
