@@ -12,6 +12,30 @@ Supports three models: **DeepSeek-MoE**, **Qwen2-MoE**, **Xverse-MoE**.
 conda activate SMoE
 pip install -r requirements.txt
 ```
+
+> **Key dependencies:** `datasets>=2.0.0` (auto-download benchmark datasets on first run), `huggingface-hub==0.32.4` (auto-download model weights)
+
+---
+
+## Auto-Download
+
+**Models and datasets are downloaded automatically** if not found locally.
+
+- Model weights are saved to `parameters/<model_name>/` inside the project directory.
+- Datasets are saved to `datasets/` inside the project directory.
+
+Simply set `--model_path` to the corresponding folder under `parameters/`:
+
+| Model | `--model_path` |
+|---|---|
+| Qwen2-MoE | `parameters/qwenmoe` |
+| DeepSeek-MoE | `parameters/deepseekmoe` |
+| Xverse-MoE | `parameters/xversemoe` |
+
+If the folder is empty or does not exist, the weights will be downloaded automatically from HuggingFace before inference starts.
+
+> **Note:** Model weights are large (16B+ parameters). Make sure you have sufficient disk space and a stable network connection before the first run.
+
 ---
 
 ## Quick Start
@@ -21,17 +45,17 @@ pip install -r requirements.txt
 ```bash
 # Qwen2-MoE
 MODEL_NAME=qwenmoe \
-MODEL_PATH=/path/to/qwen2_moe \
+MODEL_PATH=parameters/qwenmoe \
 bash run.sh
 
 # DeepSeek-MoE
 MODEL_NAME=deepseekmoe \
-MODEL_PATH=/path/to/deepseekmoe \
+MODEL_PATH=parameters/deepseekmoe \
 bash run.sh
 
 # Xverse-MoE
 MODEL_NAME=xversemoe \
-MODEL_PATH=/path/to/xversemoe \
+MODEL_PATH=parameters/xversemoe \
 bash run.sh
 ```
 
@@ -40,7 +64,7 @@ bash run.sh
 ```bash
 python main.py \
     --model_name   qwenmoe \
-    --model_path   /path/to/qwen2_moe \
+    --model_path   parameters/qwenmoe \
     --config_path  configs/qwen2moe_config.json \
     --dataset_path wic \
     --input_num    20 \
