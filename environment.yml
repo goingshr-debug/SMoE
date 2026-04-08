@@ -1,4 +1,4 @@
-name: Nmoe
+name: SMoE
 channels:
   - conda-forge
   - https://repo.anaconda.com/pkgs/main
