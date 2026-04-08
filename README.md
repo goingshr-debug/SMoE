@@ -1,4 +1,4 @@
-# SMoEaligned
+# SMoE
 
 SMoE inference acceleration framework with GPU/CPU expert caching for Mixture-of-Experts LLMs. SMoE leverages expert importance to guide decisions, substituting low-importance active experts with functionally similar ones already cached in GPU memory, thereby preserving accuracy. 
 
