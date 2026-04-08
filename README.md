@@ -17,27 +17,6 @@ pip install -r requirements.txt
 
 ---
 
-## Auto-Download
-
-**Models and datasets are downloaded automatically** if not found locally.
-
-- Model weights are saved to `parameters/<model_name>/` inside the project directory.
-- Datasets are saved to `datasets/` inside the project directory.
-
-Simply set `--model_path` to the corresponding folder under `parameters/`:
-
-| Model | `--model_path` |
-|---|---|
-| Qwen2-MoE | `parameters/qwenmoe` |
-| DeepSeek-MoE | `parameters/deepseekmoe` |
-| Xverse-MoE | `parameters/xversemoe` |
-
-If the folder is empty or does not exist, the weights will be downloaded automatically from HuggingFace before inference starts.
-
-> **Note:** Model weights are large (16B+ parameters). Make sure you have sufficient disk space and a stable network connection before the first run.
-
----
-
 ## Quick Start
 
 ### Run with `run.sh`
@@ -90,6 +69,26 @@ python main.py \
 | `--cpu_cores` | `3` | Number of CPU cores allocated to inference (n-1 for compute, 1 for loading/bg worker) |
 | `--debug` | `False` | Enable debugpy remote debugger on port 9501 |
 
+## Auto-Download
+
+**Models and datasets are downloaded automatically** if not found locally.
+
+- Model weights are saved to `parameters/<model_name>/` inside the project directory.
+- Datasets are saved to `datasets/` inside the project directory.
+
+Simply set `--model_path` to the corresponding folder under `parameters/`:
+
+| Model | `--model_path` |
+|---|---|
+| Qwen2-MoE | `parameters/qwenmoe` |
+| DeepSeek-MoE | `parameters/deepseekmoe` |
+| Xverse-MoE | `parameters/xversemoe` |
+
+If the folder is empty or does not exist, the weights will be downloaded automatically from HuggingFace before inference starts.
+
+> **Note:** Model weights are large (16B+ parameters). Make sure you have sufficient disk space and a stable network connection before the first run.
+
+---
 ## SMoE Config JSON
 
 Each model has a config JSON under `configs/`:
