@@ -1,0 +1,14 @@
+# Model weights and datasets (too large for git)
+parameters/
+datasets/
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temp files
+*.log
+/tmp/
