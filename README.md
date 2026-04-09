@@ -59,7 +59,7 @@ python main.py \
     --model_name   qwenmoe \
     --model_path   parameters/qwenmoe \
     --config_path  configs/qwen2moe_config.json \
-    --dataset_path wic \
+    --dataset_path gaokao_math_ii \
     --input_num    20 \
     --output_len   100 \
     --cpu_cores    3 \
@@ -75,7 +75,7 @@ python main.py \
 | `--model_name` | `qwenmoe` | Model to run: `qwenmoe` \| `deepseekmoe` \| `xversemoe` |
 | `--model_path` | *(empty)* | Path to model weights directory. If empty, uses the hardcoded default in `main.py` |
 | `--config_path` | *(empty)* | Path to SMoE config JSON (see `configs/`). If empty, falls back to `config.json` inside model directory |
-| `--dataset_path` | `wic` | Dataset name or path passed to `utils/load_dataset.py` |
+| `--dataset_path` | `gaokao_math_ii` | Dataset name or path passed to `utils/load_dataset.py` |
 | `--input_num` | `20` | Number of prompts to run |
 | `--batch_size` | `1` | Batch size per forward pass |
 | `--output_len` | `100` | Max new tokens to generate per prompt |
@@ -130,7 +130,7 @@ All `run.sh` arguments are controlled via environment variables (same names, upp
 | `MODEL_NAME` | `qwenmoe` | Same as `--model_name` |
 | `MODEL_PATH` | *(empty)* | Same as `--model_path` |
 | `CONFIG_PATH` | *(empty)* | Same as `--config_path` |
-| `DATASET_PATH` | `wic` | Same as `--dataset_path` |
+| `DATASET_PATH` | `gaokao_math_ii` | Same as `--dataset_path` |
 | `INPUT_NUM` | `20` | Same as `--input_num` |
 | `BATCH_SIZE` | `1` | Same as `--batch_size` |
 | `OUTPUT_LEN` | `100` | Same as `--output_len` |
