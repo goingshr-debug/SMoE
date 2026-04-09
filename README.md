@@ -125,7 +125,7 @@ All `run.sh` arguments are controlled via environment variables (same names, upp
 | `CPU_CORES` | `3` | Same as `--cpu_cores` |
 | `LOG_LEVEL` | `INFO` | Logging level: `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
 | `LOG_DIR` | `./logs` | Directory for log files |
-| `CONDA_ENV` | `Nmoe` | Conda environment to activate |
+| `CONDA_ENV` | `SMoE` | Conda environment to activate |
 
 ---
 
