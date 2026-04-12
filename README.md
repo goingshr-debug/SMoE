@@ -142,7 +142,7 @@ All `run.sh` arguments are controlled via environment variables (same names, upp
 
 ---
 
-## Evaluation
+## Accuracy Evaluation
 
 We provide OpenCompass-based benchmark evaluation for DeepSeek MoE, Xverse MoE, and Qwen MoE models.
 
