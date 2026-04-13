@@ -53,6 +53,41 @@ DATASET_CONFIGS = {
         "hf_fields":  {"article": "article", "question": "question",
                        "options": "options", "answer": "answer"},
     },
+    # GAOKAO-Bench MCQ subsets (RUCAIBox/gaokao-bench on HuggingFace).
+    # save_format="gaokao_json" writes {"example": [{"question": ...}, ...]}
+    # to match the structure expected by load_dataset.load_GAOKAO_MCQs().
+    "gaokao_math_ii": {
+        "local_path": os.path.join(DATASET_DIR, "GAOKAO-BENCH", "data",
+                                   "Multiple-choice_Questions",
+                                   "2010-2022_Math_II_MCQs.json"),
+        "hf_dataset": ("RUCAIBox/gaokao-bench", "2010-2022_Math_II_MCQs", "test"),
+        "hf_fields":  {"question": "question"},
+        "save_format": "gaokao_json",
+    },
+    "gaokao_math_i": {
+        "local_path": os.path.join(DATASET_DIR, "GAOKAO-BENCH", "data",
+                                   "Multiple-choice_Questions",
+                                   "2010-2022_Math_I_MCQs.json"),
+        "hf_dataset": ("RUCAIBox/gaokao-bench", "2010-2022_Math_I_MCQs", "test"),
+        "hf_fields":  {"question": "question"},
+        "save_format": "gaokao_json",
+    },
+    "gaokao_history": {
+        "local_path": os.path.join(DATASET_DIR, "GAOKAO-BENCH", "data",
+                                   "Multiple-choice_Questions",
+                                   "2010-2022_History_MCQs.json"),
+        "hf_dataset": ("RUCAIBox/gaokao-bench", "2010-2022_History_MCQs", "test"),
+        "hf_fields":  {"question": "question"},
+        "save_format": "gaokao_json",
+    },
+    "gaokao_biology": {
+        "local_path": os.path.join(DATASET_DIR, "GAOKAO-BENCH", "data",
+                                   "Multiple-choice_Questions",
+                                   "2010-2022_Biology_MCQs.json"),
+        "hf_dataset": ("RUCAIBox/gaokao-bench", "2010-2022_Biology_MCQs", "test"),
+        "hf_fields":  {"question": "question"},
+        "save_format": "gaokao_json",
+    },
 }
 
 
@@ -134,14 +169,22 @@ def download_dataset(name: str) -> str:
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     ds_name, ds_config, ds_split = cfg["hf_dataset"]
     fields = cfg["hf_fields"]
+    save_format = cfg.get("save_format", "jsonl")
 
     print(f"[download] dataset={name}  hf={ds_name}/{ds_config}/{ds_split}  ->  {local_path}")
     ds = hf_load(ds_name, ds_config, split=ds_split)
 
-    with open(local_path, "w", encoding="utf-8") as f:
-        for row in ds:
-            record = {k: row[v] for k, v in fields.items() if v in row}
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    if save_format == "gaokao_json":
+        # Save as {"example": [{"question": ...}, ...]} to match load_GAOKAO_MCQs().
+        q_field = fields["question"]
+        examples = [{"question": row[q_field]} for row in ds if q_field in row]
+        with open(local_path, "w", encoding="utf-8") as f:
+            json.dump({"example": examples}, f, ensure_ascii=False, indent=2)
+    else:
+        with open(local_path, "w", encoding="utf-8") as f:
+            for row in ds:
+                record = {k: row[v] for k, v in fields.items() if v in row}
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     print(f"[done] {name}  ({len(ds)} records -> {local_path})")
     return local_path
