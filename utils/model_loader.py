@@ -345,12 +345,29 @@ def _make_module_cpu(model_path,model_type,device,state_dict_00):
     return expertwrapper
 
 
+def _compute_expert_size_bytes(model_config, model_type: str) -> int:
+    """Return the number of GPU bytes occupied by one expert's weight matrices (bfloat16).
+
+    Each expert has 3 weight matrices (gate_proj / up_proj / down_proj),
+    each of shape (intermediate_size, hidden_size) in bfloat16 = 2 bytes.
+    """
+    hidden = model_config.hidden_size
+    if model_type in ("deepseekmoe", "qwenmoe"):
+        inter = model_config.moe_intermediate_size
+    elif model_type == "xversemoe":
+        inter = model_config.intermediate_size
+    else:
+        raise ValueError(f"_compute_expert_size_bytes: unknown model_type={model_type}")
+    return 3 * hidden * inter * 2
+
+
 def build_model(
     model_path: str,
     model_type: str,
     device: torch.device,
-    main_size: int,
+    main_size: int = None,
     config_path: str = None,
+    gpu_mem_gb: float = None,
     # predictor1: Predictor,
     # predictor2: Predictor
 ):
@@ -423,6 +440,33 @@ def build_model(
     if offload_size_ == None:
         raise ValueError("This model is not supported")
     
+    # ── Auto-compute main_size if not explicitly provided ─────────────────────
+    # Measured after the model skeleton has been allocated on GPU but before
+    # ExpertCache is created.  At this point the skeleton already holds all
+    # non-expert parameters (attention, embedding, layer-norms), so
+    # torch.cuda.memory_allocated() gives a good estimate of that overhead.
+    if main_size is None:
+        if gpu_mem_gb is None:
+            raise ValueError(
+                "build_model: either main_size or gpu_mem_gb must be provided."
+            )
+        expert_bytes = _compute_expert_size_bytes(model_config, model_type)
+        total_budget = int(gpu_mem_gb * (1024 ** 3))
+        if torch.cuda.is_available() and str(device) != 'cpu':
+            skeleton_used = torch.cuda.memory_allocated(device)
+        else:
+            skeleton_used = 0
+        available = max(0, total_budget - skeleton_used)
+        main_size = max(1, int(available / expert_bytes))
+        logger.info(
+            "[AUTO CACHE] gpu_mem=%.1f GB  skeleton_used=%.2f GB  "
+            "expert_size=%.2f MB  -> cache_size=%d",
+            gpu_mem_gb,
+            skeleton_used / (1024 ** 3),
+            expert_bytes / (1024 ** 2),
+            main_size,
+        )
+
     # wrap make_module_* so they load config from cfg_path, weights from model_path
     def _make_module_cuda_cfg(mp, mt, dev, sd):
         return _make_module_cuda(cfg_path, mt, dev, sd)

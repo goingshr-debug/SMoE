@@ -161,16 +161,12 @@ all_inputs   = load_all(dataset_path, args.batch_size, args.input_num)
 # ── Model initialization ─────────────────────────────────────────────────────
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-# cache_size = 300 for all models (as specified)
-cache_size = 470 if args.model_name == 'qwenmoe' else 300
-
 _cfg_path = args.config_path if args.config_path else None
 model = build_model(
     model_path=model_name,
     model_type=model_type,
     device=device,
-    main_size=cache_size,
+    gpu_mem_gb=args.GPU_mem,
     config_path=_cfg_path,
 )
 model = model.to(device)
@@ -186,7 +182,7 @@ try:
     _smoe_cfg = {k: _cfg_dict[k] for k in _smoe_keys if k in _cfg_dict}
     print(f"[CONFIG] model_name={args.model_name}  model_path={model_name}")
     print(f"[CONFIG] config_path={_config_file}")
-    print(f"[CONFIG] cache_size={cache_size}  output_len={args.output_len}  input_num={args.input_num}")
+    print(f"[CONFIG] cache_size=auto(gpu_mem={args.GPU_mem}GB)  output_len={args.output_len}  input_num={args.input_num}")
     print(f"[CONFIG] SMoE fields: {_smoe_cfg}")
 except Exception as _e:
     print(f"[CONFIG] Failed to read config: {_e}")
