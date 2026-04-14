@@ -229,7 +229,7 @@ for i, _ in enumerate(all_inputs):
             len(_smoe_base._cpu_ms_cur_token_samples))
         _smoe_base._cpu_ms_cur_token_samples = []
 
-    print(f"[CPU compute_ms per token] prompt={i}: {_smoe_base.cpu_compute_ms_per_token}")
+    # print(f"[CPU compute_ms per token] prompt={i}: {_smoe_base.cpu_compute_ms_per_token}")
 
     # Print prompt-level totals here.
     decode_tokens   = expertcache.tokens - 1   # subtract 1 for prefill token
