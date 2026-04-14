@@ -10,7 +10,7 @@ DATASET_PATH="${DATASET_PATH:-wic}"            # Dataset name or path
 INPUT_NUM="${INPUT_NUM:-20}"                   # Number of inference samples
 BATCH_SIZE="${BATCH_SIZE:-1}"                  # Batch size
 OUTPUT_LEN="${OUTPUT_LEN:-100}"                # Max new tokens per prompt
-GPU_MEM="${GPU_MEM:-24}"                       # GPU memory in GB, affects cache_size
+GPU_MEM="${GPU_MEM:-43}"                       # GPU memory in GB, affects cache_size
 CPU_CORES="${CPU_CORES:-3}"                   # Number of CPU cores allocated to inference
 
 # ── Logging settings ───────────────────────────────────────────────────────────
