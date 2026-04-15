@@ -142,6 +142,12 @@ class AbstractMoELayer(nn.Module, ABC):
         # Predicted next-layer expert IDs (set by background worker)
         self.next_experts: Optional[List[int]] = None
 
+        # INT8 dynamic-quantized CPU expert cache.
+        # Key: ExpertUID  →  Value: quantized nn.Module (torch.qint8 weights)
+        # Safe to cache permanently: same uid always has identical weights
+        # from the model checkpoint regardless of eviction/reload cycles.
+        # self._cpu_quant_cache: Dict = {}
+
     # ------------------------------------------------------------------
     # Abstract interface — subclasses must implement these
     # ------------------------------------------------------------------
@@ -446,29 +452,39 @@ class AbstractMoELayer(nn.Module, ABC):
 
     @torch.no_grad()
     def _cpu_compute(self, cpu_uids, expert_token_dic, expert_out_dict):
+        if not cpu_uids:
+            return
+
+        # ── Collect inputs and weight tensors for all CPU experts ──────────
+        tokens_list, gate_ws, up_ws, down_ws = [], [], [], []
         for uid in cpu_uids:
-            expert = self.ExpertCache.get_compute_expert(uid, offload=True)
+            wrapper = self.ExpertCache.get_compute_expert(uid, offload=True)
+            mlp     = wrapper._module          # DeepseekMLP / Qwen2MoeMLP / XverseMLP
+            tokens_list.append(expert_token_dic[uid][0].to("cpu"))
+            gate_ws.append(mlp.gate_proj.weight)
+            up_ws.append(mlp.up_proj.weight)
+            down_ws.append(mlp.down_proj.weight)
 
-            t_to_cpu_0  = time.time()
-            tokens_cpu  = expert_token_dic[uid][0].to("cpu")
-            t_compute_0 = time.time()
-            out_cpu     = expert(tokens_cpu)
-            t_to_gpu_0  = time.time()
-            out         = out_cpu.to(self.config.device)
-            t_end       = time.time()
+        # ── Single C++ call: all experts computed in one parallel region ───
+        from utils.cpu_ext import get_cpu_ext
+        t_compute_0 = time.time()
+        outputs_cpu = get_cpu_ext().silu_mlp_batch_forward(
+            tokens_list, gate_ws, up_ws, down_ws)
+        t_compute_1 = time.time()
 
-            to_cpu_ms  = (t_compute_0 - t_to_cpu_0)  * 1000
-            compute_ms = (t_to_gpu_0  - t_compute_0) * 1000
-            to_gpu_ms  = (t_end       - t_to_gpu_0)  * 1000
-            elapsed    = t_to_gpu_0   - t_compute_0   # compute-only for balancer
+        elapsed    = t_compute_1 - t_compute_0
+        compute_ms = elapsed * 1000
 
+        # ── Transfer back to GPU + apply routing weights ───────────────────
+        for i, uid in enumerate(cpu_uids):
+            out = outputs_cpu[i].to(self.config.device)
             out.mul_(expert_token_dic[uid][1])
             expert_out_dict[uid] = out
 
-            self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
-            self.CPUComputeTimeOneExpertOneBatch = \
-                self.CPUComputeTimeOneExpertOneBatch[-10:]
+        # timing: total wall-clock compute time for all CPU experts this call
+        self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
+        self.CPUComputeTimeOneExpertOneBatch = \
+            self.CPUComputeTimeOneExpertOneBatch[-10:]
 
-            # Accumulate compute_ms for per-token average
-            global _cpu_ms_cur_token_samples
-            _cpu_ms_cur_token_samples.append(compute_ms)
+        global _cpu_ms_cur_token_samples
+        _cpu_ms_cur_token_samples.append(compute_ms)

@@ -6,11 +6,11 @@ set -euo pipefail
 MODEL_NAME="${MODEL_NAME:-qwenmoe}"           # deepseekmoe | qwenmoe | xversemoe
 MODEL_PATH="${MODEL_PATH:-}"                   # Model weights directory (empty = auto-download)
 CONFIG_PATH="${CONFIG_PATH:-}"                 # SMoE config.json path (empty = use default in model dir)
-DATASET_PATH="${DATASET_PATH:-wic}"            # Dataset name or path
+DATASET_PATH="${DATASET_PATH:-gaokao_math_ii}"            # Dataset name or path
 INPUT_NUM="${INPUT_NUM:-20}"                   # Number of inference samples
 BATCH_SIZE="${BATCH_SIZE:-1}"                  # Batch size
 OUTPUT_LEN="${OUTPUT_LEN:-100}"                # Max new tokens per prompt
-GPU_MEM="${GPU_MEM:-24}"                       # GPU memory in GB, affects cache_size
+GPU_MEM="${GPU_MEM:-43}"                       # GPU memory in GB, affects cache_size
 CPU_CORES="${CPU_CORES:-3}"                   # Number of CPU cores allocated to inference
 
 # ── Logging settings ───────────────────────────────────────────────────────────

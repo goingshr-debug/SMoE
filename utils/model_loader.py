@@ -250,6 +250,7 @@ class ExpertWrapper(nn.Module):
         if self.replace_layer_storage == None:
             raise ValueError("This model is not supported")
         expert_module, self.storage = self.replace_layer_storage(expert_module, device,tocpu)
+        self._module = expert_module  # direct reference for weight tensor access
         self.expert_module = lambda *args, **kwargs: expert_module(*args, **kwargs)
         self._register_state_dict_hook(self._add_storage_to_state_dict_hook)
         self._register_load_state_dict_pre_hook(self._load_storage_from_state_dict_hook)

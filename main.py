@@ -191,6 +191,25 @@ logger.info(f"Current CPU memory usage: {psutil.Process().memory_info().rss / (1
 
 output_len = args.output_len
 
+# ── CPU expert kernel warm-up ────────────────────────────────────────────────
+# Must run BEFORE the inference loop so that:
+#   1. JIT compilation (first call) finishes here, not during decode timing.
+#   2. at::parallel_for's thread pool is fully initialised and warmed up.
+# Only runs when if_usecpu is enabled in the model config.
+if getattr(model.config, 'if_usecpu', False):
+    from utils.cpu_ext import get_cpu_ext as _get_cpu_ext
+    _ext_warmup = _get_cpu_ext()          # compile (first call) or load .so cache
+    _H = model.config.hidden_size
+    _I = getattr(model.config, 'moe_intermediate_size', None) or model.config.intermediate_size
+    _wg = torch.zeros(_I, _H, dtype=torch.bfloat16)
+    _wu = torch.zeros(_I, _H, dtype=torch.bfloat16)
+    _wd = torch.zeros(_H, _I, dtype=torch.bfloat16)
+    _wx = torch.zeros(1,  _H, dtype=torch.bfloat16)
+    for _ in range(10):   # enough iterations to fully init the thread pool
+        _ext_warmup.silu_mlp_batch_forward([_wx], [_wg], [_wu], [_wd])
+    del _wg, _wu, _wd, _wx, _ext_warmup
+    print(f"[WARMUP] CPU expert kernel ready  (H={_H}, I={_I})", flush=True)
+
 # ── Inference loop ───────────────────────────────────────────────────────────
 
 import utils.expertcache as expertcache
