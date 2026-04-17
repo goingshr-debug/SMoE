@@ -733,11 +733,12 @@ def CPU_load_management(uid_batch, cpucost, loadcost, prefetch_pcie_budget=0.0):
             all_cpucost += cpucost
 
     if tokens > 0:  # decode 阶段才打印
-        print('CPU_load_management: cpucost={}'.format(cpucost))
-        print('CPU_load_management: loadcost={}'.format(loadcost))
-        print('CPU_load_management: prefetch_pcie_budget={}'.format(prefetch_pcie_budget))
-        print('CPU_load_management: final cpulst={}'.format(cpulst))
-        print('CPU_load_management: final loadlst={}'.format(loadlst))
+        pass
+        # print('CPU_load_management: cpucost={}'.format(cpucost))
+        # print('CPU_load_management: loadcost={}'.format(loadcost))
+        # print('CPU_load_management: prefetch_pcie_budget={}'.format(prefetch_pcie_budget))
+        # print('CPU_load_management: final cpulst={}'.format(cpulst))
+        # print('CPU_load_management: final loadlst={}'.format(loadlst),flush=True)
 
     return loadlst, cpulst
 

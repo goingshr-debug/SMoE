@@ -412,8 +412,9 @@ class AbstractMoELayer(nn.Module, ABC):
 
         if pcie_uids and _b8_elapsed > 0:
             actual_per_expert = _b8_elapsed / len(pcie_uids)
+            # print(f'PCIe load time: {actual_per_expert:f} s per expert (total {len(pcie_uids)} experts)', flush=True)
             lst = self.ExpertCache.LoadTimeOneExpert
-            lst.append(actual_per_expert)
+            lst.append(actual_per_expert * 1.2)  # adjust by 1.2 to account for GPU compute time after load
             if len(lst) > 10:
                 self.ExpertCache.LoadTimeOneExpert = lst[-10:]
 
@@ -476,15 +477,17 @@ class AbstractMoELayer(nn.Module, ABC):
         compute_ms = elapsed * 1000
 
         # ── Transfer back to GPU + apply routing weights ───────────────────
+        # print('cpu compute time: %.2f ms for %d experts' % (compute_ms, len(cpu_uids)),flush=True)
         for i, uid in enumerate(cpu_uids):
             out = outputs_cpu[i].to(self.config.device)
             out.mul_(expert_token_dic[uid][1])
             expert_out_dict[uid] = out
 
         # timing: total wall-clock compute time for all CPU experts this call
-        self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
+        # self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
+        self.CPUComputeTimeOneExpertOneBatch.append(elapsed / len(cpu_uids))
         self.CPUComputeTimeOneExpertOneBatch = \
             self.CPUComputeTimeOneExpertOneBatch[-10:]
 
         global _cpu_ms_cur_token_samples
-        _cpu_ms_cur_token_samples.append(compute_ms)
+        _cpu_ms_cur_token_samples.append(compute_ms / len(cpu_uids))

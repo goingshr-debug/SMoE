@@ -205,10 +205,22 @@ if getattr(model.config, 'if_usecpu', False):
     _wu = torch.zeros(_I, _H, dtype=torch.bfloat16)
     _wd = torch.zeros(_H, _I, dtype=torch.bfloat16)
     _wx = torch.zeros(1,  _H, dtype=torch.bfloat16)
-    for _ in range(10):   # enough iterations to fully init the thread pool
+    for _ in range(5):   # JIT compilation + thread pool init
         _ext_warmup.silu_mlp_batch_forward([_wx], [_wg], [_wu], [_wd])
+    _warmup_times = []
+    for _ in range(5):   # stable timing after JIT is done
+        _t0 = time.perf_counter()
+        _ext_warmup.silu_mlp_batch_forward([_wx], [_wg], [_wu], [_wd])
+        _warmup_times.append(time.perf_counter() - _t0)
+    _cpu_init_elapsed = sum(_warmup_times) / len(_warmup_times)
+    # Propagate measured time to all MoE layers (replaces hardcoded [0.05])
+    from MoEModule.SMoE_base import AbstractMoELayer as _AbstractMoELayer
+    for _m in model.modules():
+        if isinstance(_m, _AbstractMoELayer):
+            _m.CPUComputeTimeOneExpertOneBatch = [_cpu_init_elapsed]
     del _wg, _wu, _wd, _wx, _ext_warmup
-    print(f"[WARMUP] CPU expert kernel ready  (H={_H}, I={_I})", flush=True)
+    print(f"[WARMUP] CPU expert kernel ready  (H={_H}, I={_I}, "
+          f"measured={_cpu_init_elapsed*1000:.2f}ms)", flush=True)
 
 # ── Inference loop ───────────────────────────────────────────────────────────
 
