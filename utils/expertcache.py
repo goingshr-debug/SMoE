@@ -620,34 +620,35 @@ class ExpertCache:
     def wait_until_queue_empty(self):
         with self.cv:
             self.cv.wait_for(lambda: len(self.load_queue) == 0 and self.pending_callbacks == 0)
-def replaceset_between_tokens(scores:list,a:float,topk):
+def replaceset_between_tokens(scores:list,a:float,topk,return_sorted=False):
     replaceset = set()
     allset = set()
     n_tokens = len(scores)
-    n_experts = len(scores[0])
     sort_index = [sorted(range(len(input_list)),key=lambda i:input_list[i],reverse=True) for input_list in scores]
     sort_scores = [[scores[j][i] for i in sort_index[j]] for j in range(n_tokens)]
     for token_id in range(n_tokens):
         midscore = sort_scores[token_id][topk]
         # lscore = find_smallest_max_outlier(sort_scores[token_id][:topk+6])
         lscore = midscore+a*midscore
-        for expert_i in range(n_experts):
-            if sort_scores[token_id][expert_i] >= lscore and expert_i<topk:
+        for expert_i in range(topk):
+            if sort_scores[token_id][expert_i] >= lscore:
                 replaceset.add(sort_index[token_id][expert_i])
-            if expert_i <topk:
-                allset.add(sort_index[token_id][expert_i])
+            allset.add(sort_index[token_id][expert_i])
+    if return_sorted:
+        return list(replaceset), list(allset), sort_index, sort_scores
     return list(replaceset),list(allset)
 
-def cache_router(scores:list,cache:ExpertCache,a:float,topk:int,replaceset:list,layer_id:int):
+def cache_router(scores:list,cache:ExpertCache,a:float,topk:int,replaceset:list,
+                 layer_id:int,sorted_indices=None,sorted_scores=None):
     n_tokens =len(scores)
     n_experts = len(scores[0])
     cacherouter_experts = [[None for i in range(topk)] for j in range(n_tokens)]
     top_uid = [[] for j in range(n_tokens)]
-    sort_index = [sorted(range(len(input_list)),key=lambda i:input_list[i],reverse=True) for input_list in scores]
-    sort_scores = [[scores[j][i] for i in sort_index[j]] for j in range(n_tokens)]
-    expertdic_batch = dict()
-    tokendict_alter = dict()
-    tokendict_highnum = dict()
+    sort_index = sorted_indices
+    sort_scores = sorted_scores
+    if sort_index is None or sort_scores is None:
+        sort_index = [sorted(range(len(input_list)),key=lambda i:input_list[i],reverse=True) for input_list in scores]
+        sort_scores = [[scores[j][i] for i in sort_index[j]] for j in range(n_tokens)]
     
     for token_id in range(n_tokens):
         midscore = sort_scores[token_id][topk]
@@ -662,33 +663,24 @@ def cache_router(scores:list,cache:ExpertCache,a:float,topk:int,replaceset:list,
                 cacherouter_experts[token_id][expert_i] =expertid
                 top_uid[token_id].append((layer_id,expertid))
                 high_num+=1
-                uid = (layer_id,expertid)
-                expertdic_batch[uid]=expertdic_batch.get(uid, 0) + 1
             elif rscore < sort_scores[token_id][expert_i] < midscore:
                 canreplaceset.add(expertid)
-                tokendict_alter[token_id] = tokendict_alter.get(token_id,[])
-                replaceuid = (layer_id,expertid)
-                tokendict_alter[token_id].append(replaceuid)
+            elif sort_scores[token_id][expert_i] <= rscore:
+                break
 
-        low_score_experts_needload=0
-        tokendict_highnum[token_id] = high_num
         for expert_i in range(high_num,topk):
             expertid = sort_index[token_id][expert_i]
             uid = (layer_id,expertid)
             if cache.query_expert(uid) or expertid in replaceset:
                 cacherouter_experts[token_id][expert_i] =expertid
-                cache.ready_compute((layer_id,expertid))
-                expertdic_batch[uid]=expertdic_batch.get(uid, 0) + 1
+                cache.ready_compute(uid)
                 continue
             flag = 0
-            low_score_experts_needload+=1
             for replaceexpertid in canreplaceset:
                 replaceuid = (layer_id,replaceexpertid)
                 if (cache.query_expert(replaceuid) or replaceexpertid in replaceset) and replaceexpertid not in cacherouter_experts[token_id]:
 
                     cacherouter_experts[token_id][expert_i] = replaceexpertid
-        
-                    expertdic_batch[replaceuid]=expertdic_batch.get(replaceuid, 0) + 1
                     canreplaceset.remove(replaceexpertid)
                     cache.ready_compute(replaceuid)
                     flag=1
@@ -697,7 +689,6 @@ def cache_router(scores:list,cache:ExpertCache,a:float,topk:int,replaceset:list,
                 continue
             else:
                 cacherouter_experts[token_id][expert_i]=expertid
-                expertdic_batch[uid]=expertdic_batch.get(uid, 0) + 1
                 cache.ready_compute(uid)
 
     return cacherouter_experts,top_uid

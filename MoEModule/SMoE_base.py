@@ -233,15 +233,21 @@ class AbstractMoELayer(nn.Module, ABC):
         # ── B1: replaceset + cache_router/top-k ──────────────────────────
         replaceset = []
         topk_idx_cpu = None
+        cache_selection_pinned = False
         if self.replaceScoreRatio is not None and expertcache_module.tokens > 0:
-            replaceset, allset = replaceset_between_tokens(
-                routing_weights_list, self.replaceScoreRatio, top_k)
+            replaceset, allset, sorted_indices, sorted_scores = \
+                replaceset_between_tokens(
+                    routing_weights_list, self.replaceScoreRatio, top_k,
+                    return_sorted=True)
 
             if self.if_replace:
                 cacherouter_experts, _ = cache_router(
                     routing_weights_list, self.ExpertCache,
                     self.replaceScoreRatio, top_k,
-                    replaceset, self.layerid)
+                    replaceset, self.layerid,
+                    sorted_indices=sorted_indices,
+                    sorted_scores=sorted_scores)
+                cache_selection_pinned = True
                 topk_idx_cpu = cacherouter_experts
                 topk_idx = torch.tensor(
                     topk_idx_cpu, dtype=torch.long,
@@ -260,10 +266,12 @@ class AbstractMoELayer(nn.Module, ABC):
 
         # ── B2: build expert_token_dic (optimized: no one_hot/nonzero) ──
 
-        # Notify cache for all chosen experts
-        for tok_experts in topk_idx_cpu:
-            for eid in tok_experts:
-                self.ExpertCache.ready_compute((self.layerid, eid))
+        # cache_router pins replacement selections immediately.  The regular
+        # top-k path still needs to pin its selections here.
+        if not cache_selection_pinned:
+            for tok_experts in topk_idx_cpu:
+                for eid in tok_experts:
+                    self.ExpertCache.ready_compute((self.layerid, eid))
 
         if self.get_norm_topk_prob():
             topk_weight = topk_weight / topk_weight.sum(dim=-1, keepdim=True)
