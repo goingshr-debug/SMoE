@@ -17,6 +17,7 @@ Concrete subclasses:
 import time
 import threading
 import logging
+import os
 from abc import ABC, abstractmethod
 
 import torch
@@ -44,6 +45,10 @@ _cpu_ms_cur_token_idx: int = -1           # token index currently being accumula
 _cpu_ms_cur_token_samples: List[float] = []    # compute_ms of each CPU expert this token
 cpu_compute_ms_per_token: List[float] = []     # average compute_ms flushed per token
 cpu_compute_token_indices: List[int] = []      # matching token index (0 = prefill)
+cpu_activation_d2h_copies: int = 0
+cpu_activation_d2h_bytes: int = 0
+cpu_output_h2d_copies: int = 0
+cpu_output_h2d_bytes: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +138,15 @@ class AbstractMoELayer(nn.Module, ABC):
         self.if_prefetch      = getattr(config, 'if_prefetch',      False)
         self.if_replace       = getattr(config, 'if_replace',       False)
         self.replaceScoreRatio = getattr(config, 'replaceScoreRatio', None)
+        self._batch_cpu_transfers = os.environ.get(
+            "SMOE_CPU_BATCH_TRANSFERS", "1"
+        ).strip().lower() not in {"0", "false", "off", "no"}
+        if layerid == 0:
+            logger.info(
+                "[CPU transfer] batch_repeated_activations_and_outputs=%s "
+                "(override with SMOE_CPU_BATCH_TRANSFERS=0|1)",
+                self._batch_cpu_transfers,
+            )
 
         # Rolling window for CPU-compute time estimator
         self.CPUComputeTimeOneExpertOneBatch = [0.05]
@@ -300,6 +314,7 @@ class AbstractMoELayer(nn.Module, ABC):
                 hidden_states[top_x],
                 topk_weight[top_x, slots, None],
                 top_x,
+                tok_indices,
             ]
 
         # ── B3: shared expert (GPU default stream) ───────────────────────
@@ -459,29 +474,83 @@ class AbstractMoELayer(nn.Module, ABC):
 
     @torch.no_grad()
     def _cpu_compute(self, cpu_uids, expert_token_dic, expert_out_dict):
+        if not cpu_uids:
+            return
+        if not self._batch_cpu_transfers:
+            self._cpu_compute_reference(
+                cpu_uids, expert_token_dic, expert_out_dict)
+            return
+
+        # Decode normally routes one token to several CPU experts.  Reuse the
+        # D2H activation for identical token slices, then concatenate all CPU
+        # expert outputs for one H2D transfer.
+        cpu_inputs = {}
+        cpu_results = []
+        for uid in cpu_uids:
+            expert = self.ExpertCache.get_compute_expert(uid, offload=True)
+            token_key = tuple(expert_token_dic[uid][3])
+            tokens_cpu = cpu_inputs.get(token_key)
+            if tokens_cpu is None:
+                tokens_cpu = expert_token_dic[uid][0].to("cpu")
+                cpu_inputs[token_key] = tokens_cpu
+                self._record_cpu_transfer(tokens_cpu, d2h=True)
+
+            t_compute_0 = time.time()
+            out_cpu = expert(tokens_cpu)
+            compute_ms = (time.time() - t_compute_0) * 1000
+            cpu_results.append((uid, out_cpu, compute_ms))
+            self._record_cpu_compute(compute_ms)
+
+        if len(cpu_results) == 1:
+            output_batch_cpu = cpu_results[0][1]
+        else:
+            output_batch_cpu = torch.cat(
+                [result[1] for result in cpu_results], dim=0)
+        output_batch = output_batch_cpu.to(self.config.device)
+        self._record_cpu_transfer(output_batch_cpu, d2h=False)
+
+        row_offset = 0
+        for uid, out_cpu, _ in cpu_results:
+            rows = out_cpu.size(0)
+            out = output_batch.narrow(0, row_offset, rows)
+            out.mul_(expert_token_dic[uid][1])
+            expert_out_dict[uid] = out
+            row_offset += rows
+
+    def _record_cpu_compute(self, compute_ms):
+        elapsed = compute_ms / 1000.0
+        self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
+        self.CPUComputeTimeOneExpertOneBatch = \
+            self.CPUComputeTimeOneExpertOneBatch[-10:]
+
+        global _cpu_ms_cur_token_samples
+        _cpu_ms_cur_token_samples.append(compute_ms)
+
+    @staticmethod
+    def _record_cpu_transfer(tensor, d2h):
+        global cpu_activation_d2h_copies, cpu_activation_d2h_bytes
+        global cpu_output_h2d_copies, cpu_output_h2d_bytes
+        nbytes = tensor.numel() * tensor.element_size()
+        if d2h:
+            cpu_activation_d2h_copies += 1
+            cpu_activation_d2h_bytes += nbytes
+        else:
+            cpu_output_h2d_copies += 1
+            cpu_output_h2d_bytes += nbytes
+
+    @torch.no_grad()
+    def _cpu_compute_reference(self, cpu_uids, expert_token_dic, expert_out_dict):
         for uid in cpu_uids:
             expert = self.ExpertCache.get_compute_expert(uid, offload=True)
 
-            t_to_cpu_0  = time.time()
             tokens_cpu  = expert_token_dic[uid][0].to("cpu")
+            self._record_cpu_transfer(tokens_cpu, d2h=True)
             t_compute_0 = time.time()
             out_cpu     = expert(tokens_cpu)
-            t_to_gpu_0  = time.time()
+            compute_ms  = (time.time() - t_compute_0) * 1000
             out         = out_cpu.to(self.config.device)
-            t_end       = time.time()
-
-            to_cpu_ms  = (t_compute_0 - t_to_cpu_0)  * 1000
-            compute_ms = (t_to_gpu_0  - t_compute_0) * 1000
-            to_gpu_ms  = (t_end       - t_to_gpu_0)  * 1000
-            elapsed    = t_to_gpu_0   - t_compute_0   # compute-only for balancer
+            self._record_cpu_transfer(out_cpu, d2h=False)
 
             out.mul_(expert_token_dic[uid][1])
             expert_out_dict[uid] = out
-
-            self.CPUComputeTimeOneExpertOneBatch.append(elapsed)
-            self.CPUComputeTimeOneExpertOneBatch = \
-                self.CPUComputeTimeOneExpertOneBatch[-10:]
-
-            # Accumulate compute_ms for per-token average
-            global _cpu_ms_cur_token_samples
-            _cpu_ms_cur_token_samples.append(compute_ms)
+            self._record_cpu_compute(compute_ms)

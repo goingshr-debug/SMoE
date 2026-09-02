@@ -208,6 +208,10 @@ for i, _ in enumerate(all_inputs):
     _smoe_base.cpu_compute_token_indices.clear()
     _smoe_base._cpu_ms_cur_token_samples.clear()
     _smoe_base._cpu_ms_cur_token_idx = -1
+    _smoe_base.cpu_activation_d2h_copies = 0
+    _smoe_base.cpu_activation_d2h_bytes = 0
+    _smoe_base.cpu_output_h2d_copies = 0
+    _smoe_base.cpu_output_h2d_bytes = 0
     texts  = all_inputs[i]
     print('=' * 20, flush=True)
     print(f"input_id: {i}")
@@ -257,6 +261,14 @@ for i, _ in enumerate(all_inputs):
                 "total=%.4f s  decode_tokens=%d",
                 i, expertcache.prefill_time, avg_decode_time,
                 end - start, decode_tokens)
+    logger.info(
+        "[CPU transfer] prompt=%d activation_d2h=%d/%dB output_h2d=%d/%dB",
+        i,
+        _smoe_base.cpu_activation_d2h_copies,
+        _smoe_base.cpu_activation_d2h_bytes,
+        _smoe_base.cpu_output_h2d_copies,
+        _smoe_base.cpu_output_h2d_bytes,
+    )
 
     results = tokenizer.batch_decode(outputs, skip_special_tokens=True)
     logger.warning("results: %s", results)
