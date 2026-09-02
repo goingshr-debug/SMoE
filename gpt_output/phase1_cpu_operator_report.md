@@ -8,11 +8,10 @@ scaling target in CPU-only paired measurements. CPU=9 means 1 shared/load core +
 
 | Path | 8 compute cores | 16 compute cores | 8→16 throughput gain |
 |---|---:|---:|---:|
-| INT4 paired trial 1 | 0.2118 ms | 0.1416 ms | +49.6% |
-| INT4 paired trial 2 | 0.2134 ms | 0.1411 ms | +51.3% |
-| INT4 warm-kernel trials | 0.187–0.189 ms | 0.122 ms | +53%–55% |
+| INT4 paired trial 1 | 0.2155 ms | 0.1412 ms | +52.5% |
+| INT4 paired trial 2 | 0.2132 ms | 0.1405 ms | +51.7% |
 
-At a fixed core count, groupwise INT4 is 2.70–2.86x faster than the original
+At a fixed core count, groupwise INT4 is 2.67–2.82x faster than the original
 BF16 expert in paired tests. These are operator results, not end-to-end decode
 claims. The required decode A/B could not run because the NVIDIA driver and
 `/dev/nvidia0,1` are unavailable; see `gpu_gate_20260902.txt`.
@@ -27,6 +26,8 @@ claims. The required decode A/B could not run because the NVIDIA driver and
    CPU path now builds group-size-128 INT4 packs while retaining the original
    pinned BF16 flat storage for GPU H2D/cache swaps. GPU expert math and storage
    layout are unchanged.
+   `scales_and_zeros` is materialized as a contiguous tensor because the private
+   PyTorch CPU kernel requires its packed scale metadata to be contiguous.
 3. `SMOE_CPU_QUANT=int4` is the default. `int8` and `bf16` provide fallback and
    feature-off paths without changing the deployment command.
 4. Prompt logs now report decode-only CPU expert mean/median/p95 wall time.

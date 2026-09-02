@@ -125,10 +125,10 @@ seven_ledgers:
       evidence:
         - kind: benchmark
           locator: gpt_output/qwen_cpu_int4_paired_8_t1.json; gpt_output/qwen_cpu_int4_paired_16_t1.json
-          observation: INT4 median 0.2118 ms at 8 compute cores and 0.1416 ms at 16; throughput +49.6%.
+          observation: INT4 median 0.2155 ms at 8 compute cores and 0.1412 ms at 16; throughput +52.5%.
         - kind: benchmark
           locator: gpt_output/qwen_cpu_int4_paired_8_t2.json; gpt_output/qwen_cpu_int4_paired_16_t2.json
-          observation: INT4 median 0.2134 ms at 8 compute cores and 0.1411 ms at 16; throughput +51.3%.
+          observation: INT4 median 0.2132 ms at 8 compute cores and 0.1405 ms at 16; throughput +51.7%.
       next_check: Repeat in the integrated deployment command.
     - id: VAL-002
       status: passed
@@ -136,7 +136,7 @@ seven_ledgers:
       evidence:
         - kind: benchmark
           locator: gpt_output/qwen_cpu_int4_paired_*.json
-          observation: Paired fixed-core speedup is 2.70x to 2.86x.
+          observation: Paired fixed-core speedup is 2.67x to 2.82x.
       next_check: Validate decode-level contribution.
     - id: VAL-003
       status: blocked

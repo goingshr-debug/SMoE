@@ -107,8 +107,13 @@ def pack_int4(weight: torch.Tensor, group_size: int = 128):
     codes = torch.round((grouped - zeros.unsqueeze(-1)) / scales.unsqueeze(-1) + 8.0)
     codes = codes.clamp_(0, 15).to(torch.int32).reshape(rows, cols)
     packed = torch.ops.aten._convert_weight_to_int4pack_for_cpu(codes, 8)
-    scales_and_zeros = torch.stack((scales, zeros), dim=-1).transpose(0, 1)
-    return packed, scales_and_zeros.to(torch.bfloat16)
+    scales_and_zeros = (
+        torch.stack((scales, zeros), dim=-1)
+        .transpose(0, 1)
+        .to(torch.bfloat16)
+        .contiguous()
+    )
+    return packed, scales_and_zeros
 
 
 def linear_int4(x: torch.Tensor, pack, group_size: int = 128):
@@ -121,6 +126,12 @@ def linear_int4(x: torch.Tensor, pack, group_size: int = 128):
 def run_forward_int4(x: torch.Tensor, gate_pack, up_pack, down_pack):
     gate = linear_int4(x, gate_pack)
     up = linear_int4(x, up_pack)
+    return linear_int4(F.silu(gate) * up, down_pack)
+
+
+def run_forward_int4_fused(x: torch.Tensor, gate_up_pack, down_pack, intermediate: int):
+    gate_up = linear_int4(x, gate_up_pack)
+    gate, up = gate_up.split(intermediate, dim=-1)
     return linear_int4(F.silu(gate) * up, down_pack)
 
 
@@ -138,7 +149,9 @@ def main() -> None:
     parser.add_argument("--node", type=int, default=0)
     parser.add_argument(
         "--mode",
-        choices=("reference", "fused", "int8", "int8_fused", "int4"),
+        choices=(
+            "reference", "fused", "int8", "int8_fused", "int4", "int4_fused"
+        ),
         required=True,
     )
     parser.add_argument("--warmup", type=int, default=10)
@@ -175,6 +188,8 @@ def main() -> None:
             pack_int4(gate_up[intermediate:]),
             pack_int4(down),
         )
+    elif args.mode == "int4_fused":
+        int8_packs = (pack_int4(gate_up), pack_int4(down))
 
     def execute():
         if int8_packs is not None:
@@ -182,6 +197,8 @@ def main() -> None:
                 return run_forward_int8_fused(x, *int8_packs, intermediate)
             if args.mode == "int4":
                 return run_forward_int4(x, *int8_packs)
+            if args.mode == "int4_fused":
+                return run_forward_int4_fused(x, *int8_packs, intermediate)
             return run_forward_int8(x, *int8_packs)
         return run_forward(x, gate_up, down, fused)
 

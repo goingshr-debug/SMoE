@@ -71,8 +71,13 @@ class Qwen2MoeMLP(nn.Module):
         )
         codes = codes.clamp_(0, 15).to(torch.int32).reshape(rows, cols)
         packed = torch.ops.aten._convert_weight_to_int4pack_for_cpu(codes, 8)
-        scales_and_zeros = torch.stack((scales, zeros), dim=-1).transpose(0, 1)
-        return packed, scales_and_zeros.to(torch.bfloat16)
+        scales_and_zeros = (
+            torch.stack((scales, zeros), dim=-1)
+            .transpose(0, 1)
+            .to(torch.bfloat16)
+            .contiguous()
+        )
+        return packed, scales_and_zeros
 
     @staticmethod
     def _linear_int4(x: torch.Tensor, packed, group_size: int = 128):
