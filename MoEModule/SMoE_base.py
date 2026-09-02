@@ -219,7 +219,7 @@ class AbstractMoELayer(nn.Module, ABC):
         top_k          = self.get_top_k()
         gate           = self.get_gate()
 
-        # ── B0: gate + softmax + score tracking + topk ──────────────────
+        # ── B0: gate + softmax + score tracking ─────────────────────────
         router_logits   = gate(hidden_states)
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
 
@@ -230,11 +230,9 @@ class AbstractMoELayer(nn.Module, ABC):
             for score_l in routing_weights_list:
                 self.ExpertCache.update_scores(self.layerid, score_l)
 
-        topk_weight, topk_idx = torch.topk(
-            routing_weights, top_k, dim=-1, sorted=True)
-
-        # ── B1: replaceset + cache_router ────────────────────────────────
+        # ── B1: replaceset + cache_router/top-k ──────────────────────────
         replaceset = []
+        topk_idx_cpu = None
         if self.replaceScoreRatio is not None and expertcache_module.tokens > 0:
             replaceset, allset = replaceset_between_tokens(
                 routing_weights_list, self.replaceScoreRatio, top_k)
@@ -244,11 +242,16 @@ class AbstractMoELayer(nn.Module, ABC):
                     routing_weights_list, self.ExpertCache,
                     self.replaceScoreRatio, top_k,
                     replaceset, self.layerid)
-                topk_idx    = torch.tensor(cacherouter_experts,
-                                           device=topk_weight.device)
-                topk_weight = routing_weights[
-                    torch.arange(routing_weights.size(0)).unsqueeze(1),
-                    topk_idx]
+                topk_idx_cpu = cacherouter_experts
+                topk_idx = torch.tensor(
+                    topk_idx_cpu, dtype=torch.long,
+                    device=routing_weights.device)
+                topk_weight = routing_weights.gather(1, topk_idx)
+
+        if topk_idx_cpu is None:
+            topk_weight, topk_idx = torch.topk(
+                routing_weights, top_k, dim=-1, sorted=True)
+            topk_idx_cpu = topk_idx.tolist()
 
         # Prefetch hit accounting
         if self.if_prefetch and expertcache_module.tokens > 0:
@@ -256,7 +259,6 @@ class AbstractMoELayer(nn.Module, ABC):
                 self.layerid, set())
 
         # ── B2: build expert_token_dic (optimized: no one_hot/nonzero) ──
-        topk_idx_cpu = topk_idx.tolist()
 
         # Notify cache for all chosen experts
         for tok_experts in topk_idx_cpu:
