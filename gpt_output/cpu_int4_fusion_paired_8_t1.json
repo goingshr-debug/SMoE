@@ -1,0 +1,1 @@
+{"cores": [0, 1, 2, 3, 4, 5, 6, 7], "fused_median_ms": 0.1891235, "fused_speedup": 0.9852186534195909, "outputs_equal": true, "repeats": 240, "separate_median_ms": 0.186328, "threads": 8}

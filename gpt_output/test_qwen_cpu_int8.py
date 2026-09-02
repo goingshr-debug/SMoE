@@ -49,6 +49,7 @@ def main() -> None:
     assert expert.prepare_cpu_acceleration()
     pack_seconds = time.perf_counter() - pack_start
     rss_after_pack = psutil.Process().memory_info().rss
+    engaged_mode = expert._cpu_accel_mode
     candidate = expert(x)
     assert candidate.shape == reference.shape
     assert candidate.dtype == torch.bfloat16
@@ -87,6 +88,7 @@ def main() -> None:
     print(json.dumps({
         "threads": args.threads,
         "mode": args.mode,
+        "engaged_mode": engaged_mode,
         "multi_token_shapes": multi_token_shapes,
         "cores": list(placement.compute_cores),
         "pack_seconds": pack_seconds,
