@@ -230,6 +230,18 @@ class ExpertCache:
         """Dynamically loads an array of modules with identical hyperparameters"""
         self.module_type = self.module_size = self.device = None
         self.active = False
+        cpu_quant_env = os.environ.get("SMOE_CPU_QUANT")
+        if cpu_quant_env is None:
+            legacy_int8 = os.environ.get("SMOE_CPU_INT8", "1").lower()
+            cpu_quant_env = (
+                "bf16" if legacy_int8 in {"0", "false", "off", "no"} else "int4"
+            )
+        self.cpu_quant_mode = cpu_quant_env.strip().lower()
+        if self.cpu_quant_mode not in {"int4", "int8", "bf16"}:
+            raise ValueError("SMOE_CPU_QUANT must be one of: int4, int8, bf16")
+        self.cpu_accel_enabled = self.cpu_quant_mode != "bf16"
+        self.cpu_accel_prepared = 0
+        self.cpu_accel_failed = False
 
         self.registered_experts: Dict[ExpertUID, ExpertInfo] = dict()
         self.main_modules = []
@@ -284,6 +296,11 @@ class ExpertCache:
         # DO NOT use _swap() wall time here — that only measures DMA submission (~0.2ms),
         # not DMA completion. The balancer needs completion time to compare with cpucost.
         self.LoadTimeOneExpert = [0.002]
+        logger.info(
+            "[CPU ACCEL] expert path=%s "
+            "(override with SMOE_CPU_QUANT=int4|int8|bf16)",
+            self.cpu_quant_mode,
+        )
     def _check_module(self, module: nn.Module):
         assert isinstance(module.storage, torch.UntypedStorage)
         if self.module_type is None:
@@ -330,6 +347,19 @@ class ExpertCache:
         for i in range(len(self.offloaded_storages)):
             if self.offloaded_infos[i] == 0:
                 self.offloaded_storages[i].storage.copy_(storage)
+                if self.cpu_accel_enabled and not self.cpu_accel_failed:
+                    try:
+                        if self.offloaded_storages[i].prepare_cpu_acceleration():
+                            self.cpu_accel_prepared += 1
+                    except (RuntimeError, MemoryError) as exc:
+                        self.cpu_accel_failed = True
+                        logger.warning(
+                            "[CPU ACCEL] %s prepack failed after %d experts; "
+                            "remaining experts use BF16 fallback: %s",
+                            self.cpu_quant_mode,
+                            self.cpu_accel_prepared,
+                            exc,
+                        )
                 if offload:
                     info = ExpertInfo(uid, True, 0,False,scores = FixedSizeQueueForScore(self.cache_window),index=i,offload_index=i)
                     self.registered_experts[uid] = info
@@ -757,4 +787,3 @@ def find_smallest_max_outlier(data, threshold=3):
         return min_of_max_outliers
     else:
         return mean
-

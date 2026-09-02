@@ -1,0 +1,5 @@
+2 CPUPlacement(compute_cores=(0,), shared_core=1, compute_packages=(0,), shared_package=0)
+3 CPUPlacement(compute_cores=(0, 1), shared_core=2, compute_packages=(0,), shared_package=0)
+5 CPUPlacement(compute_cores=(0, 1, 2, 3), shared_core=4, compute_packages=(0,), shared_package=0)
+9 CPUPlacement(compute_cores=(0, 1, 2, 3, 4, 6, 7, 8), shared_core=9, compute_packages=(0,), shared_package=0)
+17 CPUPlacement(compute_cores=(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), shared_core=17, compute_packages=(0,), shared_package=1)

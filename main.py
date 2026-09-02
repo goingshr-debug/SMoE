@@ -7,6 +7,7 @@ import time
 import psutil
 import argparse
 import logging
+from utils.cpu_affinity import select_cpu_placement
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,15 +28,9 @@ args = parser.parse_args()
 
 import os as _os
 
-def _pick_idle_cores(n):
-    """Sample 0.2s, return the n CPU core IDs with the lowest utilization."""
-    per_core = psutil.cpu_percent(percpu=True, interval=0.2)
-    ranked = sorted(range(len(per_core)), key=lambda i: per_core[i])
-    return ranked[:n]
-
-_cores         = _pick_idle_cores(args.cpu_cores)
-_compute_cores = _cores[:-1]   # n-1 cores: CPU matmul
-_shared_core   = _cores[-1]    # 1 core: loading + bg_worker
+_placement     = select_cpu_placement(args.cpu_cores)
+_compute_cores = list(_placement.compute_cores)  # n-1 physical cores: CPU matmul
+_shared_core   = _placement.shared_core          # 1 core: loading + bg_worker
 
 try:
     _os.sched_setaffinity(0, set(_compute_cores))  # main process uses compute_cores only
@@ -47,7 +42,11 @@ import utils.expertcache as _ecpre
 _ecpre._shared_core   = _shared_core
 _ecpre._compute_cores = _compute_cores
 
-print(f"[AFFINITY] n={args.cpu_cores}  compute={_compute_cores}  shared={_shared_core}")
+print(
+    f"[AFFINITY] n={args.cpu_cores}  compute={_compute_cores} "
+    f"compute_packages={list(_placement.compute_packages)}  "
+    f"shared={_shared_core} shared_package={_placement.shared_package}"
+)
 
 torch.set_num_threads(len(_compute_cores))  # intra-op = n-1
 torch.set_num_interop_threads(1)            # interop fixed at 1, isolated from intra-op
@@ -206,6 +205,7 @@ for i, _ in enumerate(all_inputs):
     expertcache.prefetch_loaded_by_layer = {}
     expertcache.prefetch_start_time      = {}
     _smoe_base.cpu_compute_ms_per_token.clear()
+    _smoe_base.cpu_compute_token_indices.clear()
     _smoe_base._cpu_ms_cur_token_samples.clear()
     _smoe_base._cpu_ms_cur_token_idx = -1
     texts  = all_inputs[i]
@@ -227,9 +227,27 @@ for i, _ in enumerate(all_inputs):
         _smoe_base.cpu_compute_ms_per_token.append(
             sum(_smoe_base._cpu_ms_cur_token_samples) /
             len(_smoe_base._cpu_ms_cur_token_samples))
+        _smoe_base.cpu_compute_token_indices.append(
+            _smoe_base._cpu_ms_cur_token_idx)
         _smoe_base._cpu_ms_cur_token_samples = []
 
-    # print(f"[CPU compute_ms per token] prompt={i}: {_smoe_base.cpu_compute_ms_per_token}")
+    _cpu_decode_ms = [
+        value for token_idx, value in zip(
+            _smoe_base.cpu_compute_token_indices,
+            _smoe_base.cpu_compute_ms_per_token,
+        )
+        if token_idx > 0
+    ]
+    if _cpu_decode_ms:
+        logger.info(
+            "[CPU expert] prompt=%d decode_forward_mean=%.3f ms "
+            "median=%.3f ms p95=%.3f ms sampled_tokens=%d",
+            i,
+            float(numpy.mean(_cpu_decode_ms)),
+            float(numpy.median(_cpu_decode_ms)),
+            float(numpy.percentile(_cpu_decode_ms, 95)),
+            len(_cpu_decode_ms),
+        )
 
     # Print prompt-level totals here.
     decode_tokens   = expertcache.tokens - 1   # subtract 1 for prefill token

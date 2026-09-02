@@ -251,6 +251,12 @@ class ExpertWrapper(nn.Module):
             raise ValueError("This model is not supported")
         expert_module, self.storage = self.replace_layer_storage(expert_module, device,tocpu)
         self.expert_module = lambda *args, **kwargs: expert_module(*args, **kwargs)
+        self._prepare_cpu_acceleration = (
+            getattr(expert_module, "prepare_cpu_acceleration", None) if tocpu else None
+        )
+        self._clear_cpu_acceleration = (
+            getattr(expert_module, "clear_cpu_acceleration", None) if tocpu else None
+        )
         self._register_state_dict_hook(self._add_storage_to_state_dict_hook)
         self._register_load_state_dict_pre_hook(self._load_storage_from_state_dict_hook)
 
@@ -266,6 +272,15 @@ class ExpertWrapper(nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.expert_module(*args, **kwargs)
+
+    def prepare_cpu_acceleration(self) -> bool:
+        if self._prepare_cpu_acceleration is None:
+            return False
+        return self._prepare_cpu_acceleration()
+
+    def clear_cpu_acceleration(self):
+        if self._clear_cpu_acceleration is not None:
+            self._clear_cpu_acceleration()
 
 
     def replace_layer_storage_deepseekmoe(self,

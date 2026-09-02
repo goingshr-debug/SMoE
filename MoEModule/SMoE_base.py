@@ -43,6 +43,7 @@ ExpertUID = Tuple[int, int]
 _cpu_ms_cur_token_idx: int = -1           # token index currently being accumulated
 _cpu_ms_cur_token_samples: List[float] = []    # compute_ms of each CPU expert this token
 cpu_compute_ms_per_token: List[float] = []     # average compute_ms flushed per token
+cpu_compute_token_indices: List[int] = []      # matching token index (0 = prefill)
 
 
 # ---------------------------------------------------------------------------
@@ -351,12 +352,14 @@ class AbstractMoELayer(nn.Module, ABC):
         self.ExpertCache.clear_queue()
 
         # ── Token boundary: flush CPU-ms accumulator ─────────────────────
-        global _cpu_ms_cur_token_idx, _cpu_ms_cur_token_samples, cpu_compute_ms_per_token
+        global _cpu_ms_cur_token_idx, _cpu_ms_cur_token_samples
+        global cpu_compute_ms_per_token, cpu_compute_token_indices
         cur_tok = expertcache_module.tokens
         if cur_tok != _cpu_ms_cur_token_idx:
             if _cpu_ms_cur_token_samples:
                 cpu_compute_ms_per_token.append(
                     sum(_cpu_ms_cur_token_samples) / len(_cpu_ms_cur_token_samples))
+                cpu_compute_token_indices.append(_cpu_ms_cur_token_idx)
             _cpu_ms_cur_token_samples = []
             _cpu_ms_cur_token_idx = cur_tok
 

@@ -7,6 +7,7 @@ Provides:
 """
 
 import logging
+import os
 
 import torch
 import torch.nn.functional as F
@@ -37,8 +38,90 @@ class Qwen2MoeMLP(nn.Module):
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size,
                                    bias=False, dtype=torch.bfloat16, device=config.device)
         self.act_fn = ACT2FN[config.hidden_act]
+        self._cpu_accel_packs = None
+        self._cpu_accel_mode = "bf16"
+
+    @staticmethod
+    def _pack_dynamic_int8(weight: torch.Tensor):
+        weight_float = weight.detach().float()
+        weight_min, weight_max = torch.aminmax(weight_float)
+        max_abs = max(abs(weight_min.item()), abs(weight_max.item()))
+        scale = max(max_abs / 127.0, 1.0e-8)
+        quantized = torch.quantize_per_tensor(
+            weight_float, scale, 0, torch.qint8
+        )
+        return torch.ops.quantized.linear_prepack(quantized, None)
+
+    @staticmethod
+    def _pack_groupwise_int4(weight: torch.Tensor, group_size: int = 128):
+        rows, cols = weight.shape
+        if cols % group_size:
+            raise ValueError(
+                f"INT4 group_size={group_size} must divide in_features={cols}"
+            )
+        grouped = weight.detach().float().reshape(
+            rows, cols // group_size, group_size
+        )
+        group_min = grouped.amin(dim=-1)
+        group_max = grouped.amax(dim=-1)
+        scales = ((group_max - group_min) / 15.0).clamp_min(1.0e-8)
+        zeros = group_min + 8.0 * scales
+        codes = torch.round(
+            (grouped - zeros.unsqueeze(-1)) / scales.unsqueeze(-1) + 8.0
+        )
+        codes = codes.clamp_(0, 15).to(torch.int32).reshape(rows, cols)
+        packed = torch.ops.aten._convert_weight_to_int4pack_for_cpu(codes, 8)
+        scales_and_zeros = torch.stack((scales, zeros), dim=-1).transpose(0, 1)
+        return packed, scales_and_zeros.to(torch.bfloat16)
+
+    @staticmethod
+    def _linear_int4(x: torch.Tensor, packed, group_size: int = 128):
+        weight, scales_and_zeros = packed
+        return torch.ops.aten._weight_int4pack_mm_for_cpu(
+            x, weight, group_size, scales_and_zeros
+        )
+
+    @torch.no_grad()
+    def prepare_cpu_acceleration(self) -> bool:
+        """Prepack CPU-only weights while retaining BF16 H2D backing."""
+        if self.gate_proj.weight.device.type != "cpu":
+            return False
+        mode = os.environ.get("SMOE_CPU_QUANT", "int4").strip().lower()
+        if mode == "int4":
+            self._cpu_accel_packs = (
+                self._pack_groupwise_int4(self.gate_proj.weight),
+                self._pack_groupwise_int4(self.up_proj.weight),
+                self._pack_groupwise_int4(self.down_proj.weight),
+            )
+        elif mode == "int8":
+            self._cpu_accel_packs = (
+                self._pack_dynamic_int8(self.gate_proj.weight),
+                self._pack_dynamic_int8(self.up_proj.weight),
+                self._pack_dynamic_int8(self.down_proj.weight),
+            )
+        else:
+            return False
+        self._cpu_accel_mode = mode
+        return True
+
+    def clear_cpu_acceleration(self):
+        self._cpu_accel_packs = None
+        self._cpu_accel_mode = "bf16"
 
     def forward(self, x):
+        if x.device.type == "cpu" and self._cpu_accel_packs is not None:
+            gate_pack, up_pack, down_pack = self._cpu_accel_packs
+            if self._cpu_accel_mode == "int4":
+                gate = self._linear_int4(x, gate_pack)
+                up = self._linear_int4(x, up_pack)
+                return self._linear_int4(self.act_fn(gate) * up, down_pack)
+            x_float = x.float()
+            gate = torch.ops.quantized.linear_dynamic(x_float, gate_pack, True)
+            up = torch.ops.quantized.linear_dynamic(x_float, up_pack, True)
+            output = torch.ops.quantized.linear_dynamic(
+                self.act_fn(gate) * up, down_pack, True
+            )
+            return output.to(x.dtype)
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
 

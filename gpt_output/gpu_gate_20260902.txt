@@ -1,0 +1,10 @@
+GPU 0/1 decode-test gate: NOT READY
+
+- `nvidia-smi --query-gpu=...` failed: NVIDIA-SMI could not communicate with the driver.
+- `nvidia-smi --query-compute-apps=...` failed for the same reason.
+- `/dev/nvidia0` and `/dev/nvidia1` are absent.
+- Nmoe `torch.cuda.is_available()` returned False.
+
+Consequence: no end-to-end decode benchmark was launched in this phase. CPU-only
+operator diagnostics were allowed because this host cannot create a CUDA process;
+they are not presented as decode acceptance evidence.
