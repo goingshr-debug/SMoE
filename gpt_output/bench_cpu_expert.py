@@ -76,65 +76,6 @@ def run_forward(x: torch.Tensor, gate_up: torch.Tensor, down: torch.Tensor, fuse
     return F.linear(F.silu(gate) * up, down)
 
 
-def pack_int8(weight: torch.Tensor):
-    scale = max(weight.float().abs().max().item() / 127.0, 1.0e-8)
-    quantized = torch.quantize_per_tensor(weight.float(), scale, 0, torch.qint8)
-    return torch.ops.quantized.linear_prepack(quantized, None)
-
-
-def run_forward_int8(x: torch.Tensor, gate_pack, up_pack, down_pack):
-    x_float = x.float()
-    gate = torch.ops.quantized.linear_dynamic(x_float, gate_pack, True)
-    up = torch.ops.quantized.linear_dynamic(x_float, up_pack, True)
-    return torch.ops.quantized.linear_dynamic(F.silu(gate) * up, down_pack, True).to(x.dtype)
-
-
-def run_forward_int8_fused(x: torch.Tensor, gate_up_pack, down_pack, intermediate: int):
-    gate_up = torch.ops.quantized.linear_dynamic(x.float(), gate_up_pack, True)
-    gate, up = gate_up.split(intermediate, dim=-1)
-    return torch.ops.quantized.linear_dynamic(
-        F.silu(gate) * up, down_pack, True
-    ).to(x.dtype)
-
-
-def pack_int4(weight: torch.Tensor, group_size: int = 128):
-    rows, cols = weight.shape
-    grouped = weight.float().reshape(rows, cols // group_size, group_size)
-    group_min = grouped.amin(dim=-1)
-    group_max = grouped.amax(dim=-1)
-    scales = ((group_max - group_min) / 15.0).clamp_min(1.0e-8)
-    zeros = group_min + 8.0 * scales
-    codes = torch.round((grouped - zeros.unsqueeze(-1)) / scales.unsqueeze(-1) + 8.0)
-    codes = codes.clamp_(0, 15).to(torch.int32).reshape(rows, cols)
-    packed = torch.ops.aten._convert_weight_to_int4pack_for_cpu(codes, 8)
-    scales_and_zeros = (
-        torch.stack((scales, zeros), dim=-1)
-        .transpose(0, 1)
-        .to(torch.bfloat16)
-        .contiguous()
-    )
-    return packed, scales_and_zeros
-
-
-def linear_int4(x: torch.Tensor, pack, group_size: int = 128):
-    weight, scales_and_zeros = pack
-    return torch.ops.aten._weight_int4pack_mm_for_cpu(
-        x, weight, group_size, scales_and_zeros
-    )
-
-
-def run_forward_int4(x: torch.Tensor, gate_pack, up_pack, down_pack):
-    gate = linear_int4(x, gate_pack)
-    up = linear_int4(x, up_pack)
-    return linear_int4(F.silu(gate) * up, down_pack)
-
-
-def run_forward_int4_fused(x: torch.Tensor, gate_up_pack, down_pack, intermediate: int):
-    gate_up = linear_int4(x, gate_up_pack)
-    gate, up = gate_up.split(intermediate, dim=-1)
-    return linear_int4(F.silu(gate) * up, down_pack)
-
-
 def percentile(samples: list[float], fraction: float) -> float:
     ordered = sorted(samples)
     return ordered[min(len(ordered) - 1, int(len(ordered) * fraction))]
@@ -149,9 +90,7 @@ def main() -> None:
     parser.add_argument("--node", type=int, default=0)
     parser.add_argument(
         "--mode",
-        choices=(
-            "reference", "fused", "int8", "int8_fused", "int4", "int4_fused"
-        ),
+        choices=("reference", "fused"),
         required=True,
     )
     parser.add_argument("--warmup", type=int, default=10)
@@ -173,33 +112,8 @@ def main() -> None:
     down = torch.randn((hidden, intermediate), dtype=dtype)
 
     fused = args.mode == "fused"
-    int8_packs = None
-    if args.mode == "int8":
-        int8_packs = (
-            pack_int8(gate_up[:intermediate]),
-            pack_int8(gate_up[intermediate:]),
-            pack_int8(down),
-        )
-    elif args.mode == "int8_fused":
-        int8_packs = (pack_int8(gate_up), pack_int8(down))
-    elif args.mode == "int4":
-        int8_packs = (
-            pack_int4(gate_up[:intermediate]),
-            pack_int4(gate_up[intermediate:]),
-            pack_int4(down),
-        )
-    elif args.mode == "int4_fused":
-        int8_packs = (pack_int4(gate_up), pack_int4(down))
 
     def execute():
-        if int8_packs is not None:
-            if args.mode == "int8_fused":
-                return run_forward_int8_fused(x, *int8_packs, intermediate)
-            if args.mode == "int4":
-                return run_forward_int4(x, *int8_packs)
-            if args.mode == "int4_fused":
-                return run_forward_int4_fused(x, *int8_packs, intermediate)
-            return run_forward_int8(x, *int8_packs)
         return run_forward(x, gate_up, down, fused)
 
     for _ in range(args.warmup):

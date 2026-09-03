@@ -15,7 +15,7 @@ baseline_revision: 094e464
 entrypoint: AbstractMoELayer._cpu_compute
 workload:
   decode_typical: one token routed to multiple experts
-  dtype: bfloat16 activation/output; INT4 packed CPU weights
+  dtype: bfloat16 activation/output/CPU weights
 hardware:
   gpu: unknown until compliant run
   interconnect: PCIe

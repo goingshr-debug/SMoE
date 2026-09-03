@@ -17,7 +17,7 @@ host/GPU:       route/top-k -> selected activation gathers
 default stream: shared expert
 host thread:    submit cache-hit GPU work
 load stream:    queued BF16 expert H2D
-main host:      D2H activation -> CPU INT4 expert -> H2D output
+main host:      D2H activation -> CPU BF16 expert -> H2D output
 host:           load queue drain + load_stream.synchronize()
 host:           background submission drain
 default stream: PCIe-loaded expert compute

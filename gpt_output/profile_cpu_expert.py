@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture stage-separated BF16/INT4 CPU expert torch-profiler traces."""
+"""Capture separate and fused BF16 CPU expert torch-profiler traces."""
 
 from __future__ import annotations
 
@@ -17,12 +17,8 @@ from MoEModule.qwen_moe import Qwen2MoeMLP
 from utils.cpu_affinity import select_cpu_placement
 
 
-def capture(expert, x, mode: str, output_dir: Path):
-    if mode == "bf16":
-        expert.clear_cpu_acceleration()
-    else:
-        os.environ["SMOE_CPU_QUANT"] = mode
-        expert.prepare_cpu_acceleration()
+def capture(expert, x, fused_weight, mode: str, output_dir: Path):
+    expert._cpu_gate_up_weight = fused_weight if mode == "fused" else None
 
     for _ in range(10):
         expert(x)
@@ -37,7 +33,7 @@ def capture(expert, x, mode: str, output_dir: Path):
             expert(x)
             profile.step()
 
-    trace_path = output_dir / f"cpu_expert_{mode}.trace.json"
+    trace_path = output_dir / f"cpu_expert_bf16_{mode}.trace.json"
     profile.export_chrome_trace(str(trace_path))
     print(f"trace={trace_path}")
     print(profile.key_averages().table(
@@ -59,12 +55,18 @@ def main():
         device="cpu",
     )
     expert = Qwen2MoeMLP(config).eval()
+    gate_up = torch.randn(
+        (2 * config.moe_intermediate_size, config.hidden_size),
+        dtype=torch.bfloat16,
+    )
+    expert.gate_proj.weight.data = gate_up[:config.moe_intermediate_size]
+    expert.up_proj.weight.data = gate_up[config.moe_intermediate_size:]
     x = torch.randn((1, config.hidden_size), dtype=torch.bfloat16)
     output_dir = ROOT / "gpt_output" / "profiles"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    capture(expert, x, "bf16", output_dir)
-    capture(expert, x, "int4", output_dir)
+    capture(expert, x, gate_up, "reference", output_dir)
+    capture(expert, x, gate_up, "fused", output_dir)
 
 
 if __name__ == "__main__":

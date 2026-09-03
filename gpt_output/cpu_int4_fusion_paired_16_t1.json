@@ -1,1 +1,0 @@
-{"cores": [16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 19], "fused_median_ms": 0.111065, "fused_speedup": 1.078665646243191, "outputs_equal": true, "repeats": 240, "separate_median_ms": 0.119802, "threads": 16}

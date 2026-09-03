@@ -2,7 +2,3 @@ __pycache__/
 profiles/*.trace.json
 cpu_micro_*.json
 cpu_placement_probe.txt
-qwen_cpu_int8_paired_*.json
-qwen_cpu_int8_production*.json
-qwen_cpu_int8_shape_validation.json
-qwen_cpu_int4_contiguous_*.json

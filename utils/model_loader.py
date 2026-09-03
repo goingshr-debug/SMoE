@@ -238,6 +238,7 @@ class ExpertWrapper(nn.Module):
             tocpu:bool
     ):
         super().__init__()
+        self.model_type = model_type
         self.replace_layer_storage = None
         if model_type == "deepseekmoe":
             self.replace_layer_storage = self.replace_layer_storage_deepseekmoe
@@ -250,13 +251,10 @@ class ExpertWrapper(nn.Module):
         if self.replace_layer_storage == None:
             raise ValueError("This model is not supported")
         expert_module, self.storage = self.replace_layer_storage(expert_module, device,tocpu)
+        self.cpu_bf16_gate_up_fused = (
+            getattr(expert_module, "_cpu_gate_up_weight", None) is not None
+        )
         self.expert_module = lambda *args, **kwargs: expert_module(*args, **kwargs)
-        self._prepare_cpu_acceleration = (
-            getattr(expert_module, "prepare_cpu_acceleration", None) if tocpu else None
-        )
-        self._clear_cpu_acceleration = (
-            getattr(expert_module, "clear_cpu_acceleration", None) if tocpu else None
-        )
         self._register_state_dict_hook(self._add_storage_to_state_dict_hook)
         self._register_load_state_dict_pre_hook(self._load_storage_from_state_dict_hook)
 
@@ -273,16 +271,6 @@ class ExpertWrapper(nn.Module):
     def forward(self, *args, **kwargs):
         return self.expert_module(*args, **kwargs)
 
-    def prepare_cpu_acceleration(self) -> bool:
-        if self._prepare_cpu_acceleration is None:
-            return False
-        return self._prepare_cpu_acceleration()
-
-    def clear_cpu_acceleration(self):
-        if self._clear_cpu_acceleration is not None:
-            self._clear_cpu_acceleration()
-
-
     def replace_layer_storage_deepseekmoe(self,
             layer: DeepseekMLP,
             device: torch.device,
@@ -290,11 +278,20 @@ class ExpertWrapper(nn.Module):
     ):
         # logger.debug("------")
         # logger.debug(f"Current CPU memory usage: {psutil.Process().memory_info().rss / (1024 ** 2):.2f} MB")
-        states = [
-           ( "gate_proj",  getattr(layer,"gate_proj").weight.data),
-           ( "down_proj",  getattr(layer, "down_proj").weight.data),
-           ( "up_proj",    getattr(layer, "up_proj").weight.data),
-        ]
+        if self.model_type == "qwenmoe":
+            # Adjacent gate/up weights expose one zero-copy BF16 matrix to the
+            # fused CPU projection. GPU slots use the same raw storage layout.
+            states = [
+                ("gate_proj", getattr(layer, "gate_proj").weight.data),
+                ("up_proj", getattr(layer, "up_proj").weight.data),
+                ("down_proj", getattr(layer, "down_proj").weight.data),
+            ]
+        else:
+            states = [
+                ("gate_proj", getattr(layer, "gate_proj").weight.data),
+                ("down_proj", getattr(layer, "down_proj").weight.data),
+                ("up_proj", getattr(layer, "up_proj").weight.data),
+            ]
 
         storage_size = 0
         offsets = [0]
@@ -332,6 +329,17 @@ class ExpertWrapper(nn.Module):
             patched = getattr(layer, k)
             patched.weight.data = newtensor
             assert patched.weight.data.data_ptr() == newtensor.data_ptr()
+
+        configure_gate_up = getattr(layer, "configure_cpu_bf16_gate_up", None)
+        if tocpu and configure_gate_up is not None:
+            gate = newtensors["gate_proj"]
+            up = newtensors["up_proj"]
+            assert gate.data_ptr() + gate.nbytes == up.data_ptr()
+            gate_up_storage = storage[offsets[0]:offsets[2]]
+            gate_up = torch.as_tensor(
+                gate_up_storage, dtype=gate.dtype, device="cpu"
+            ).view(gate.size(0) + up.size(0), gate.size(1))
+            configure_gate_up(gate_up)
         return layer, storage
 def _make_module_cuda(model_path,model_type,device,state_dict_00):
     config = None
