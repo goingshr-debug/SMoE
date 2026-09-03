@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+from gpu_process_gate import require_process_free_gpus
+
+require_process_free_gpus()
+
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]

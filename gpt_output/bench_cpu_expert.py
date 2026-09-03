@@ -18,6 +18,10 @@ import time
 from pathlib import Path
 
 import psutil
+from gpu_process_gate import require_process_free_gpus
+
+require_process_free_gpus()
+
 import torch
 import torch.nn.functional as F
 
@@ -95,8 +99,14 @@ def main() -> None:
     )
     parser.add_argument("--warmup", type=int, default=10)
     parser.add_argument("--repeats", type=int, default=40)
+    parser.add_argument(
+        "--experts", type=int, default=1,
+        help="number of BF16 weight sets rotated during measurement",
+    )
     parser.add_argument("--seed", type=int, default=20260902)
     args = parser.parse_args()
+    if args.experts < 1:
+        raise ValueError("--experts must be at least 1")
 
     cores = select_cores(args.placement, args.threads, args.node)
     os.sched_setaffinity(0, cores)
@@ -108,41 +118,61 @@ def main() -> None:
     intermediate = 2560
     dtype = torch.bfloat16
     x = torch.randn((1, hidden), dtype=dtype)
-    gate_up = torch.randn((2 * intermediate, hidden), dtype=dtype)
-    down = torch.randn((hidden, intermediate), dtype=dtype)
+    gate_up_weights = [
+        torch.randn((2 * intermediate, hidden), dtype=dtype)
+        for _ in range(args.experts)
+    ]
+    down_weights = [
+        torch.randn((hidden, intermediate), dtype=dtype)
+        for _ in range(args.experts)
+    ]
 
     fused = args.mode == "fused"
 
-    def execute():
-        return run_forward(x, gate_up, down, fused)
+    def execute(index):
+        expert_index = index % args.experts
+        return run_forward(
+            x,
+            gate_up_weights[expert_index],
+            down_weights[expert_index],
+            fused,
+        )
 
-    for _ in range(args.warmup):
-        execute()
+    for index in range(max(args.warmup, args.experts)):
+        execute(index)
 
     samples_ms = []
-    for _ in range(args.repeats):
+    for index in range(args.repeats):
         start = time.perf_counter_ns()
-        execute()
+        execute(index)
         samples_ms.append((time.perf_counter_ns() - start) / 1_000_000)
 
-    reference = run_forward(x, gate_up, down, False)
-    candidate = execute()
+    reference = run_forward(
+        x, gate_up_weights[0], down_weights[0], False)
+    candidate = run_forward(
+        x, gate_up_weights[0], down_weights[0], fused)
+    weight_bytes = gate_up_weights[0].nbytes + down_weights[0].nbytes
+    median_ms = statistics.median(samples_ms)
     result = {
         "threads": args.threads,
         "placement": args.placement,
         "node": args.node,
         "cores": cores,
         "mode": args.mode,
+        "rotating_experts": args.experts,
         "shape": {"tokens": 1, "hidden": hidden, "intermediate": intermediate},
         "dtype": str(dtype),
         "warmup": args.warmup,
         "repeats": args.repeats,
-        "median_ms": statistics.median(samples_ms),
+        "median_ms": median_ms,
         "mean_ms": statistics.fmean(samples_ms),
         "min_ms": min(samples_ms),
         "p95_ms": percentile(samples_ms, 0.95),
         "max_abs_diff_vs_reference": (candidate.float() - reference.float()).abs().max().item(),
         "bitwise_equal_vs_reference": torch.equal(candidate, reference),
+        "weight_bytes_per_forward": weight_bytes,
+        "resident_weight_bytes": weight_bytes * args.experts,
+        "effective_weight_gbps_at_median": weight_bytes / (median_ms * 1_000_000),
         "torch_version": torch.__version__,
     }
     print(json.dumps(result, sort_keys=True))

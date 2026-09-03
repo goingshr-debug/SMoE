@@ -2,6 +2,13 @@
 """CPU-only equivalence checks for the fused replacement-routing sort."""
 
 import random
+from pathlib import Path
+import sys
+
+from gpu_process_gate import require_process_free_gpus
+
+require_process_free_gpus()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.expertcache import cache_router, replaceset_between_tokens
 

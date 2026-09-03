@@ -2,7 +2,14 @@
 """Validate the zero-copy, full-precision BF16 Qwen gate/up projection."""
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
+import sys
+
+from gpu_process_gate import require_process_free_gpus
+
+require_process_free_gpus()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import torch
 

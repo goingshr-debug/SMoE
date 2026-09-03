@@ -4,6 +4,10 @@
 from pathlib import Path
 import sys
 
+from gpu_process_gate import require_process_free_gpus
+
+require_process_free_gpus()
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from utils.cpu_affinity import select_cpu_placement
 
