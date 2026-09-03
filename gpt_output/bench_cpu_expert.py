@@ -62,6 +62,24 @@ def select_cores(placement: str, threads: int, node: int) -> list[int]:
                 f"NUMA node {node} has only {len(cores)} physical cores; requested {threads}"
             )
         return cores[:threads]
+    if placement == "split":
+        nodes = sorted(
+            int(path.name[4:])
+            for path in Path("/sys/devices/system/node").glob("node[0-9]*")
+        )
+        if len(nodes) < 2:
+            raise RuntimeError("split placement requires at least two NUMA nodes")
+        per_node = [physical_cores_for_node(cpu_node) for cpu_node in nodes[:2]]
+        selected = []
+        for index in range(threads):
+            cpu_node = index % 2
+            core_index = index // 2
+            if core_index >= len(per_node[cpu_node]):
+                raise RuntimeError(
+                    f"NUMA node {nodes[cpu_node]} lacks physical core {core_index}"
+                )
+            selected.append(per_node[cpu_node][core_index])
+        return selected
 
     usage = psutil.cpu_percent(percpu=True, interval=0.2)
     allowed = os.sched_getaffinity(0)
@@ -69,15 +87,25 @@ def select_cores(placement: str, threads: int, node: int) -> list[int]:
     return ranked[:threads]
 
 
-def run_forward(x: torch.Tensor, gate_up: torch.Tensor, down: torch.Tensor, fused: bool):
+def run_forward(x: torch.Tensor, gate_up: torch.Tensor, down: torch.Tensor, mode: str):
     intermediate = gate_up.shape[0] // 2
-    if fused:
-        gate_up_out = F.linear(x, gate_up)
+    use_mv = mode.endswith("_mv")
+
+    def project(weight):
+        if use_mv:
+            return torch.mv(weight, x[0]).unsqueeze(0)
+        return F.linear(x, weight)
+
+    if mode.startswith("fused"):
+        gate_up_out = project(gate_up)
         gate, up = gate_up_out.split(intermediate, dim=-1)
     else:
-        gate = F.linear(x, gate_up[:intermediate])
-        up = F.linear(x, gate_up[intermediate:])
-    return F.linear(F.silu(gate) * up, down)
+        gate = project(gate_up[:intermediate])
+        up = project(gate_up[intermediate:])
+    intermediate_state = F.silu(gate) * up
+    if use_mv:
+        return torch.mv(down, intermediate_state[0]).unsqueeze(0)
+    return F.linear(intermediate_state, down)
 
 
 def percentile(samples: list[float], fraction: float) -> float:
@@ -89,12 +117,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--threads", type=int, required=True)
     parser.add_argument(
-        "--placement", choices=("legacy", "physical", "topology"), required=True
+        "--placement", choices=("legacy", "physical", "split", "topology"),
+        required=True
     )
     parser.add_argument("--node", type=int, default=0)
     parser.add_argument(
         "--mode",
-        choices=("reference", "fused"),
+        choices=("reference", "fused", "reference_mv", "fused_mv"),
         required=True,
     )
     parser.add_argument("--warmup", type=int, default=10)
@@ -102,6 +131,10 @@ def main() -> None:
     parser.add_argument(
         "--experts", type=int, default=1,
         help="number of BF16 weight sets rotated during measurement",
+    )
+    parser.add_argument(
+        "--pinned-weights", action="store_true",
+        help="allocate weights through the CUDA pinned host allocator like production",
     )
     parser.add_argument("--seed", type=int, default=20260902)
     args = parser.parse_args()
@@ -118,16 +151,14 @@ def main() -> None:
     intermediate = 2560
     dtype = torch.bfloat16
     x = torch.randn((1, hidden), dtype=dtype)
-    gate_up_weights = [
-        torch.randn((2 * intermediate, hidden), dtype=dtype)
-        for _ in range(args.experts)
-    ]
-    down_weights = [
-        torch.randn((hidden, intermediate), dtype=dtype)
-        for _ in range(args.experts)
-    ]
+    def make_weight(shape):
+        return torch.empty(
+            shape, dtype=dtype, pin_memory=args.pinned_weights).normal_()
 
-    fused = args.mode == "fused"
+    gate_up_weights = [make_weight((2 * intermediate, hidden))
+                       for _ in range(args.experts)]
+    down_weights = [make_weight((hidden, intermediate))
+                    for _ in range(args.experts)]
 
     def execute(index):
         expert_index = index % args.experts
@@ -135,7 +166,7 @@ def main() -> None:
             x,
             gate_up_weights[expert_index],
             down_weights[expert_index],
-            fused,
+            args.mode,
         )
 
     for index in range(max(args.warmup, args.experts)):
@@ -148,9 +179,9 @@ def main() -> None:
         samples_ms.append((time.perf_counter_ns() - start) / 1_000_000)
 
     reference = run_forward(
-        x, gate_up_weights[0], down_weights[0], False)
+        x, gate_up_weights[0], down_weights[0], "reference")
     candidate = run_forward(
-        x, gate_up_weights[0], down_weights[0], fused)
+        x, gate_up_weights[0], down_weights[0], args.mode)
     weight_bytes = gate_up_weights[0].nbytes + down_weights[0].nbytes
     median_ms = statistics.median(samples_ms)
     result = {
@@ -172,6 +203,7 @@ def main() -> None:
         "bitwise_equal_vs_reference": torch.equal(candidate, reference),
         "weight_bytes_per_forward": weight_bytes,
         "resident_weight_bytes": weight_bytes * args.experts,
+        "pinned_weights": args.pinned_weights,
         "effective_weight_gbps_at_median": weight_bytes / (median_ms * 1_000_000),
         "torch_version": torch.__version__,
     }

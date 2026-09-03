@@ -27,12 +27,32 @@ def run_one(threads, mode, experts, node, warmup, repeats):
         "--node", str(node),
         "--mode", mode,
         "--experts", str(experts),
+        "--pinned-weights",
         "--warmup", str(warmup),
         "--repeats", str(repeats),
     ]
     completed = subprocess.run(
-        command, cwd=ROOT, check=True, capture_output=True, text=True)
+        command, cwd=ROOT, capture_output=True, text=True)
+    if completed.returncode:
+        if completed.stdout:
+            print(completed.stdout, file=sys.stderr, end="")
+        if completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="")
+        completed.check_returncode()
     return json.loads(completed.stdout)
+
+
+def write_checkpoint(path, node, results, status):
+    payload = {
+        "dtype_contract": "BF16 weights, BF16 activation, BF16 output",
+        "gpu_process_gate": "passed before parent and every completed child benchmark",
+        "weight_memory": "CUDA pinned host memory (production offload layout)",
+        "node": node,
+        "status": status,
+        "results": results,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def main():
@@ -62,15 +82,9 @@ def main():
                     result["trial"] = trial
                     results.append(result)
                     print(json.dumps(result, sort_keys=True), flush=True)
+                    write_checkpoint(args.output, args.node, results, "running")
 
-    payload = {
-        "dtype_contract": "BF16 weights, BF16 activation, BF16 output",
-        "gpu_process_gate": "passed before parent and every child benchmark",
-        "node": args.node,
-        "results": results,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_checkpoint(args.output, args.node, results, "complete")
     print(f"wrote={args.output}")
 
 
