@@ -2,16 +2,27 @@
 
 ## Purpose
 
-Prepare one reproducible full-BF16 operator matrix for the next interval in
-which GPU 0 and GPU 1 have no processes. No benchmark was executed in this
-phase.
+Prepare one reproducible full-BF16 operator matrix. No benchmark was executed
+in this preparation phase.
 
 ## Hard process gate
 
 Every test, benchmark, profiler, and sweep entrypoint in `gpt_output` imports
 `gpu_process_gate.require_process_free_gpus()` before importing PyTorch or SMoE
 modules. The gate queries all NVIDIA compute processes and raises before the
-test body if any process exists.
+test body if any unauthorized process exists.
+
+The user explicitly authorized one monitoring process on GPU 1. The exception
+requires both fields to match exactly:
+
+```yaml
+pid: 1393879
+process_name: /isaac-sim/kit/python/bin/python3
+purpose: Isaac Sim monitoring process
+```
+
+A PID match with another executable, a process-name match with another PID, or
+any additional process on GPU 0/1 still fails the hard gate.
 
 This covers:
 
@@ -66,8 +77,8 @@ The produced JSON is written under `gpt_output`. This operator matrix is
 supplemental; end-to-end acceptance still uses `deploy/deployment.md` unchanged
 except for `CPU_CORES=9/17`.
 
-## Current gate state
+## Gate state after the explicit exception
 
-At preparation time both GPUs were occupied by two approximately 37 GB Qwen3
-evaluation processes, and GPU 1 additionally contained the Isaac Sim process.
-Therefore the status remains `blocked-for-measurement`, not `pass` or `ship`.
+On 2026-09-03, GPU 0 had no compute process and GPU 1 contained only the exact
+authorized Isaac Sim monitor above. This state passes the process gate. A pass
+only authorizes measurement; it is not itself a performance or shipping result.
