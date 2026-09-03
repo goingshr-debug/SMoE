@@ -15,5 +15,12 @@ Planned contents:
 - correctness and performance validation notes
 - final optimization report
 
+Final decision artifacts:
+
+- `phase9_formal_ab.md`: formal CPU=9/17 baseline/candidate results and the
+  explanation for the BF16 scaling limit.
+- `final_perf_skill_report.md`: seven ledgers, hard gates, profiler limitation,
+  correctness, resources, and deployment recommendation.
+
 The pre-existing untracked `优化/` directory is reference input and is not part
 of these generated artifacts.
