@@ -2,3 +2,6 @@ __pycache__/
 profiles/*.trace.json
 cpu_micro_*.json
 cpu_placement_probe.txt
+bf16_scaling_sweep*.json
+formal_runs/
+worktrees/

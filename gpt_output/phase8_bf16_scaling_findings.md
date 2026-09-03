@@ -72,25 +72,39 @@ rotating run measured fused MV at 0.6961 ms (8 cores) and 0.4894 ms (16 cores),
 versus the matrix fused linear values of 0.6371 ms and 0.4803 ms. It is not a
 production candidate.
 
-## Pinned-memory spot check
+## Completed pinned-memory matrix
 
-One clean production-like rotating trial completed before a new unauthorized
-GPU process appeared:
+Artifact: `gpt_output/bf16_scaling_sweep_pinned.json`
 
-| BF16 path | 8 cores (ms) | 16 cores (ms) | 8→16 throughput gain |
-| --- | ---: | ---: | ---: |
-| fused gate/up, pinned weights | 0.6554 | 0.4411 | 48.6% |
+SHA256: `1914fc5f034eb4a76144e1c620160be7f12eda67673ec9feff137840cf8723ea`
 
-This is encouraging but is below the 50% threshold and only one trial, so it
-is not accepted as the final P0 result. A second trial was correctly blocked by
-the GPU process gate.
+All 40 configurations completed. The table again reports the mean of two trial
+medians.
+
+| Weight working set | BF16 path | 8 cores (ms) | 16 cores (ms) | 8→16 throughput gain | Latency reduction |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 hot expert | three linear reference | 0.5192 | 0.4260 | 21.9% | 17.9% |
+| 1 hot expert | fused gate/up | 0.5027 | 0.3253 | 54.5% | 35.3% |
+| 16 rotating experts | three linear reference | 0.6762 | 0.4918 | 37.5% | 27.3% |
+| 16 rotating experts | fused gate/up | 0.6595 | 0.4485 | 47.1% | 32.0% |
+
+The fused operator crosses the 50% throughput target for a hot expert. The
+rotating working set, which better models decode across layers and expert IDs,
+is reproducibly just below it at 47.1%; it is therefore reported as close but
+not accepted against a strict 50% operator threshold.
+
+Three longer rotating trials on NUMA node 1 produced mean trial medians of
+0.8182 ms (8 cores) and 0.4904 ms (16 cores), or 66.8% scaling. That is not a
+win: both absolute latencies are worse than node 0, and one 16-core trial had a
+14.1 ms p95 interruption. The result reinforces selecting the faster/less-busy
+single socket and not optimizing the ratio by slowing CPU=9.
 
 ## Current decision
 
 Status: `continue`.
 
 The evidence supports topology-aware physical-core placement and rejects
-cross-socket placement and `torch.mv`. The pinned-weight 8→16 result is close
-enough to justify a complete repeated pinned matrix and formal end-to-end
-CPU=9/17 A/B. The final decision must use those results, not the favorable hot
-cache row.
+cross-socket placement and `torch.mv`. The pinned rotating result is close
+enough to proceed to formal end-to-end CPU=9/17 A/B. The final decision must
+use the end-to-end and rotating results, not the favorable hot-cache row or the
+slower node-1 ratio.
